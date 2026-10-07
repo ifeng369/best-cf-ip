@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-抓取 best-cf-ips 扫描结果，为每个 IP 的国家标签追加按国家递增的序号。
+抓取 best-cf-ips 扫描结果，为每个 IP 的国家标签追加一个全局连续递增的序号
+(不管国家前缀是什么，序号一路加下去，不按国家重置)。
 
     172.64.149.89:443#SG 🇸🇬   ->   172.64.149.89:443#SG-0001 🇸🇬
     172.64.146.122:443#SG 🇸🇬   ->   172.64.146.122:443#SG-0002 🇸🇬
-    104.17.20.215:443#US 🇺🇸   ->   104.17.20.215:443#US-0001 🇺🇸
+    172.64.229.123:443#JP 🇯🇵   ->   172.64.229.123:443#JP-0003 🇯🇵   (接着加，不重置)
+    104.17.20.215:443#US 🇺🇸   ->   104.17.20.215:443#US-0004 🇺🇸
 
 用法:
     python3 scripts/update_best_cf_ip.py [--url URL] [--output best-cf-ip.txt]
@@ -68,10 +70,10 @@ def fetch(url: str, retries: int = 3, timeout: int = 30) -> str:
 
 
 def transform(text: str) -> tuple[str, Counter]:
-    """给每行 IP 打上 国家码-序号；返回 (输出内容, 各国家计数)。"""
+    """给每行 IP 打上 国家码-全局序号；序号跨国家连续，不重置。返回 (输出内容, 各国家计数)。"""
     counters: Counter = Counter()
     out: list[str] = []
-    kept = skipped = 0
+    kept = skipped = seq = 0
 
     for line in text.lstrip("\ufeff").splitlines():  # 防御 BOM 混入首行
         stripped = line.strip()
@@ -89,9 +91,9 @@ def transform(text: str) -> tuple[str, Counter]:
 
         country = m.group("country").upper()
         rest = m.group("rest") or ""
-        counters[country] += 1
-        seq = f"{counters[country]:0{HEAD_WIDTH}d}"
-        out.append(f"{m.group('addr')}#{country}-{seq}{rest}")
+        counters[country] += 1      # 仅用于统计，不影响序号
+        seq += 1                     # 全局连续递增，与国家前缀无关
+        out.append(f"{m.group('addr')}#{country}-{seq:0{HEAD_WIDTH}d}{rest}")
         kept += 1
 
     if skipped:
@@ -100,7 +102,7 @@ def transform(text: str) -> tuple[str, Counter]:
         raise RuntimeError("没有解析到任何有效 IP 行，已中止（不会覆盖现有文件）")
 
     stats = Counter(counters)
-    print(f"[info] 有效 IP 行 {kept} 行, 跳过 {skipped} 行")
+    print(f"[info] 有效 IP 行 {kept} 行, 跳过 {skipped} 行, 序号 0001-{seq:0{HEAD_WIDTH}d}")
     print("[info] 各国家数量: " + ", ".join(f"{c}={n}" for c, n in sorted(stats.items())))
     return "\n".join(out) + "\n", stats
 
@@ -121,7 +123,7 @@ def write_if_changed(path: str, content: str) -> bool:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="更新 best-cf-ip.txt（按国家追加序号）")
+    ap = argparse.ArgumentParser(description="更新 best-cf-ip.txt（追加全局连续序号）")
     ap.add_argument("--url", default=os.environ.get("SOURCE_URL", DEFAULT_URL))
     ap.add_argument("--output", default=os.environ.get("OUTPUT_FILE", DEFAULT_OUTPUT))
     args = ap.parse_args()
