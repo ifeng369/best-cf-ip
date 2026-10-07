@@ -1,0 +1,76 @@
+name: Update best-cf-ip.txt
+
+# 每天 06:00 和 12:00 自动运行（cron 使用 UTC）；
+# 若要按北京时间 06:00 / 12:00 运行，改成 '0 22,4 * * *'
+on:
+  schedule:
+    - cron: "0 6,12 * * *"
+  push:
+    branches: [main, master]
+    paths:
+      - ".github/workflows/update-best-cf-ip.yml"
+      - "scripts/update_best_cf_ip.py"
+  workflow_dispatch: # 手动触发
+
+permissions:
+  contents: write # 需要把结果提交回仓库
+
+concurrency:
+  group: update-best-cf-ip
+  cancel-in-progress: false # 定时任务与手动触发不互相打断
+
+jobs:
+  update:
+    name: Fetch and re-number IPs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 需要写入并提交，因此拉取完整历史用于 rebase
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate best-cf-ip.txt
+        env:
+          SOURCE_URL: "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ip-scanned-top50.txt"
+          OUTPUT_FILE: "best-cf-ip.txt"
+        run: python scripts/update_best_cf_ip.py
+
+      - name: Show preview (first 10 lines)
+        if: always()
+        run: |
+          if [ -f best-cf-ip.txt ]; then
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            head -n 11 best-cf-ip.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'best-cf-ip.txt 未生成' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          # 覆盖「内容有变化」与「首次生成(未跟踪)」两种情况
+          if [ -z "$(git status --porcelain -- best-cf-ip.txt)" ]; then
+            echo "内容无变化，无需提交。"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add best-cf-ip.txt
+          git commit -m "chore: update best-cf-ip.txt [skip ci]"
+          # rebase 到最新 main，避免并发推送被拒
+          for i in 1 2 3; do
+            if git push; then exit 0; fi
+            echo "push 失败，第 $i 次重试（先 rebase）..."
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+          done
+          echo "::error::push 重试 3 次仍失败"
+          exit 1
