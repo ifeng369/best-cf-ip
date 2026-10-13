@@ -39,7 +39,7 @@ jobs:
 
       - name: Generate best-cf-ip.txt
         env:
-          SOURCE_URL: "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ip-scanned-top50.txt"
+          SOURCE_URL: "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ip-scanned-top100.txt"
           OUTPUT_FILE: "best-cf-ip.txt"
         run: python scripts/update_best_cf_ip.py
 
