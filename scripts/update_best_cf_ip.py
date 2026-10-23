@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-抓取 best-cf-ips 扫描结果，为每个 IP 的国家标签追加一个全局连续递增的序号
-(不管国家前缀是什么，序号一路加下去，不按国家重置)。
+抓取 best-cf-ips 扫描结果，为每个 IP 的国家标签追加「MMddHH-全局序号」。
+序号跨国家连续，不按国家重置；MMddHH 取源文件头部 scanned at 的时间(无则用运行当前时间)。
 
-    172.64.149.89:443#SG 🇸🇬   ->   172.64.149.89:443#SG-0001 🇸🇬
-    172.64.146.122:443#SG 🇸🇬   ->   172.64.146.122:443#SG-0002 🇸🇬
-    172.64.229.123:443#JP 🇯🇵   ->   172.64.229.123:443#JP-0003 🇯🇵   (接着加，不重置)
-    104.17.20.215:443#US 🇺🇸   ->   104.17.20.215:443#US-0004 🇺🇸
+    172.64.149.89:443#SG 🇸🇬   ->   172.64.149.89:443#SG-102306-0001 🇸🇬
+    172.64.146.122:443#SG 🇸🇬   ->   172.64.146.122:443#SG-102306-0002 🇸🇬
+    172.64.229.123:443#JP 🇯🇵   ->   172.64.229.123:443#JP-102306-0003 🇯🇵   (接着加，不重置)
+    104.17.20.215:443#US 🇺🇸   ->   104.17.20.215:443#US-102306-0004 🇺🇸
 
 用法:
     python3 scripts/update_best_cf_ip.py [--url URL] [--output best-cf-ip.txt]
@@ -33,17 +33,32 @@ DEFAULT_URL = (
 )
 DEFAULT_OUTPUT = "best-cf-ip.txt"
 
-# 172.64.149.89:443#SG 🇸🇬  /  104.17.20.215:443#US-0001 🇺🇸  /  1.1.1.1:443#JP
+# 172.64.149.89:443#SG 🇸🇬  /  104.17.20.215:443#US-102306-0001 🇺🇸  /  1.1.1.1:443#JP
 ENTRY_RE = re.compile(
     r"^(?P<addr>\S+?:\d+)"      # ip:port
     r"#\s*"
     r"(?P<country>[A-Za-z]{2,3})"  # 国家码
-    r"(?:-(?P<seq>\d+))?"         # 已存在的序号(重新处理时先剥掉)
+    r"(?:-(?P<batch>\d{6}))?"      # 已存在的 MMddHH 批次号(重新处理时先剥掉)
+    r"(?:-(?P<seq>\d+))?"          # 已存在的序号(重新处理时先剥掉)
     r"(?P<rest>\s.*)?$"           # 国旗等附加信息
+)
+
+# "# 100 best cf ips scanned at 2026-10-23 04:18"
+SCANNED_AT_RE = re.compile(
+    r"scanned\s+at\s+(?P<date>\d{4}-\d{2}-\d{2})(?:[ T](?P<time>\d{2}):\d{2})?"
 )
 
 HEAD_WIDTH = 4  # 0001
 UA = "Mozilla/5.0 (compatible; best-cf-ip-updater/1.0)"
+
+
+def resolve_batch(text: str) -> str:
+    """MMddHH 批次号：优先取源文件头部 scanned at 的日期+小时，取不到则用运行当前时间。"""
+    m = SCANNED_AT_RE.search(text)
+    if m:
+        date, hh = m.group("date"), m.group("time")
+        return date[5:7] + date[8:10] + (hh or "00")
+    return time.strftime("%m%d%H")
 
 
 def fetch(url: str, retries: int = 3, timeout: int = 30) -> str:
@@ -70,7 +85,8 @@ def fetch(url: str, retries: int = 3, timeout: int = 30) -> str:
 
 
 def transform(text: str) -> tuple[str, Counter]:
-    """给每行 IP 打上 国家码-全局序号；序号跨国家连续，不重置。返回 (输出内容, 各国家计数)。"""
+    """给每行 IP 打上 国家码-MMddHH-全局序号；序号跨国家连续，不重置。返回 (输出内容, 各国家计数)。"""
+    batch = resolve_batch(text)
     counters: Counter = Counter()
     out: list[str] = []
     kept = skipped = seq = 0
@@ -93,7 +109,7 @@ def transform(text: str) -> tuple[str, Counter]:
         rest = m.group("rest") or ""
         counters[country] += 1      # 仅用于统计，不影响序号
         seq += 1                     # 全局连续递增，与国家前缀无关
-        out.append(f"{m.group('addr')}#{country}-{seq:0{HEAD_WIDTH}d}{rest}")
+        out.append(f"{m.group('addr')}#{country}-{batch}-{seq:0{HEAD_WIDTH}d}{rest}")
         kept += 1
 
     if skipped:
@@ -102,7 +118,7 @@ def transform(text: str) -> tuple[str, Counter]:
         raise RuntimeError("没有解析到任何有效 IP 行，已中止（不会覆盖现有文件）")
 
     stats = Counter(counters)
-    print(f"[info] 有效 IP 行 {kept} 行, 跳过 {skipped} 行, 序号 0001-{seq:0{HEAD_WIDTH}d}")
+    print(f"[info] 有效 IP 行 {kept} 行, 跳过 {skipped} 行, 批次 {batch}, 序号 0001-{seq:0{HEAD_WIDTH}d}")
     print("[info] 各国家数量: " + ", ".join(f"{c}={n}" for c, n in sorted(stats.items())))
     return "\n".join(out) + "\n", stats
 

@@ -1,0 +1,13 @@
+name = "best-cf-ip"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+# 源地址可改；也可以在 Dashboard / wrangler secret put SOURCE_URL 覆盖
+[vars]
+SOURCE_URL = "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ip-scanned-top100.txt"
+CACHE_TTL = "300"
+CORS_ORIGIN = "*"
+
+[observability]
+enabled = true
